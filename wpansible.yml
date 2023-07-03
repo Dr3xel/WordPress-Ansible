@@ -1,0 +1,175 @@
+---
+- hosts: localhost
+  vars_prompt:
+    - name: "db_name"
+      prompt: "Enter database name"
+      private: no
+    - name: "user"
+      prompt: "Enter the master username"
+      private: no
+    - name: "pass_wd"
+      prompt: "Enter the password for your database master"
+      private: no
+    - name: "aws_access_key"
+      prompt: "Enter your AWS Access Key"
+      private: no
+    - name: "aws_secret_key"
+      prompt: "Enter your AWS Secret Key"
+      private: no
+    - name: "region"
+      prompt: "Enter the AWS region, where you want to deploy instances"
+      private: no
+    - name: "vpc_id"
+      prompt: "Enter you VPC ID for your region"
+      private: no
+    - name: "key_name" #For this code, key must be located in the same directory as playbook
+      prompt: "Enter you Key name (ensure that it's located in the same directory and in .pem format)"
+      private: no
+
+  tasks:
+    - name: "Ensure boto execution"
+      pip:
+        name:
+          - boto3
+          - botocore
+        executable: pip3
+        state: present
+    
+    - name: "Creating Security Group"
+      amazon.aws.ec2_security_group:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        name: "wp_security_group"
+        description: "Security Group for WordPress"
+        region: "{{ region }}"
+        vpc_id: "{{ vpc_id }}"
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: 0.0.0.0/0
+          - proto: tcp
+            from_port: 80
+            to_port: 80
+            cidr_ip: 0.0.0.0/0
+          - proto: tcp
+            from_port: 3306
+            to_port: 3306
+            cidr_ip: 0.0.0.0/0
+      register: security_group
+
+    - name: "Creating EC2 Instance"
+      ec2_instance:
+        region: "{{ region }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        image_id: "ami-04e601abe3e1a910f" #Check for the latest image id
+        instance_type: "t2.micro"
+        key_name: "{{ key_name }}"
+        security_group: "{{ security_group.group_id }}"
+        state: "present"
+        wait: yes
+      register: ec2
+
+    - copy:
+        content: "ubuntu@{{ ec2.instances[0].public_ip_address }} ansible_ssh_private_key_file=\"./{{ key_name }}.pem\""
+        dest: "./myinventory/hosts.txt"
+
+    - name: "Creating AWS RDS MySql database"
+      amazon.aws.rds_instance:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        engine: "mysql"
+        vpc_security_group_ids: "{{ security_group.group_id }}"
+        db_instance_identifier: "WordPressMySQL"
+        db_name: "{{ db_name }}"
+        engine_version: "8.0.32"
+        instance_type: "db.t2.micro"
+        master_user_password: "{{ pass_wd }}"
+        allocated_storage: "20"
+        port: 3306
+        region: "{{ region }}"
+        master_username: "{{ user }}"
+      register: rds_instance_output
+
+    - meta: refresh_inventory
+
+    - debug:
+        var: rds_instance_output.endpoint.address
+    - pause:
+        seconds: 60
+
+
+    
+- hosts: all
+  become: true
+  tasks:
+    - name: "Installing Apache HTTP Server"
+      package:
+        name: "apache2"
+        state: present
+    
+    - name: "Install software-properties-common"
+      apt: name=software-properties-common
+
+    - name: "Add Ondrej PHP repository"
+      apt_repository:
+        repo: "ppa:ondrej/php"
+        state: present
+
+    - name: "Update apt cache"
+      apt:
+        update_cache: yes
+
+    - name: "Install PHP"
+      apt: name=php7.4 state=present
+
+    - name: "Installing prerequisites for WordPress"
+      apt:
+        package:
+          - php7.4
+          - php7.4-json
+          - php7.4-cgi
+          - php7.4-xsl
+          - php7.4-zip
+          - php7.4-xmlrpc
+          - php7.4-soap
+          - php7.4-intl
+          - php7.4-cli
+          - php7.4-common
+          - php7.4-curl
+          - php7.4-mysql
+          - php7.4-mbstring
+          - php7.4-gd
+          - tar
+          - libapache2-mod-php
+        state: present
+        update_cache: yes
+
+    - name: "Extension for PHP"
+      shell: apt install php7.4-mysqli
+
+    - name: "Enable PHP extension"
+      service:
+        name: apache2
+        state: restarted
+
+    - name: "Downloading the WordPress tar file"
+      ansible.builtin.unarchive:
+        remote_src: yes
+        src: "https://wordpress.org/latest.tar.gz"
+        dest: "/var/www/html"
+
+    - name: "Setting ownership for WordPress files"
+      file:
+        path: /var/www/html/wordpress
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: "Starting the httpd service"
+      service:
+        name: "apache2"
+        state: started
+        enabled: yes
+    

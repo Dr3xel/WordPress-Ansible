@@ -1,0 +1,1 @@
+ubuntu@3.72.9.186 ansible_ssh_private_key_file="./drexel.pem"
