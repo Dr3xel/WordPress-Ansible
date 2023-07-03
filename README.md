@@ -1,6 +1,14 @@
 # WordPress deployment using Ansible Playbook
-Prerequisites for this project:
-1. AWS Account with free tier
+Playbook task description:
+Create a Security Group for your intances
+Create an AWS EC2 instance
+As wordpress stores data at the backend in MySQL Database server. Therefore, you need to setup a MySQL server using AWS RDS service using Free Tier.
+Configure the instance with Apache Webserver and php.
+Download WordPress .gz and unarchive.
+Provide the endpoint/connection string to the WordPress application to make it work.
+
+# Prerequisites for this project:
+1. AWS Account with Free Tier
 2. AWS AMI Access and Secret keys
 3. Local machine or EC2 instance with:
    - Python3 and pip3
